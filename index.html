@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mini Arcade</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#1d1b2f;--panel:#2b2845;--ink:#f4efe6;--hot:#ff5d73;--gold:#ffc857;--mint:#5eead4}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:'Press Start 2P',monospace;display:flex;flex-direction:column;align-items:center;padding:16px;gap:14px}
+h1{font-size:20px;margin:8px 0 0;color:var(--gold)}
+button{font:inherit;font-size:10px;color:var(--ink);background:var(--panel);border:3px solid var(--ink);padding:10px 12px;cursor:pointer}
+button:hover,button:focus-visible{background:var(--hot);outline:none}
+nav{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+nav button.on{background:var(--gold);color:var(--bg)}
+#info{font-size:10px;display:flex;gap:16px;min-height:14px}
+#stage{width:360px;max-width:100%}
+canvas{display:block;width:100%;height:auto;border:4px solid var(--ink);background:#0f0e1a;touch-action:none}
+#ttt{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+#ttt button{aspect-ratio:1;font-size:36px;background:var(--panel)}
+#mem{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+#mem button{aspect-ratio:1;font-size:28px;padding:0}
+#mem button.up{background:var(--gold)}
+#mem button.done{background:var(--mint);cursor:default}
+#again{margin-top:10px;width:100%}
+p.tip{font-size:8px;line-height:1.8;max-width:360px;text-align:center;color:#b9b3d6;margin:0}
+@media (prefers-reduced-motion:no-preference){button{transition:background .15s}}
+</style>
+</head>
+<body>
+<h1>Mini Arcade</h1>
+<nav id="nav">
+  <button data-g="flappy">Flappy</button>
+  <button data-g="snake">Snake</button>
+  <button data-g="ttt">Tic-Tac-Toe</button>
+  <button data-g="mem">Memory</button>
+</nav>
+<div id="info"></div>
+<div id="stage">
+  <canvas id="cv" width="360" height="480"></canvas>
+  <div id="ttt" hidden></div>
+  <div id="mem" hidden></div>
+  <button id="again" hidden>Play again</button>
+</div>
+<p class="tip" id="tip"></p>
+
+<script>
+const $ = s => document.querySelector(s);
+const cv = $('#cv'), c = cv.getContext('2d');
+let cur = 'flappy', best = {};
+try { best = JSON.parse(localStorage.getItem('arcade') || '{}'); } catch (e) {}
+function save(k, v, low) {
+  const o = best[k];
+  best[k] = o === undefined ? v : low ? Math.min(o, v) : Math.max(o, v);
+  try { localStorage.setItem('arcade', JSON.stringify(best)); } catch (e) {}
+}
+const info = t => $('#info').textContent = t;
+function banner(a, b) {
+  c.fillStyle = 'rgba(15,14,26,.75)'; c.fillRect(0, 170, 360, 120);
+  c.textAlign = 'center'; c.fillStyle = '#ffc857'; c.font = "16px 'Press Start 2P',monospace";
+  c.fillText(a, 180, 225);
+  c.fillStyle = '#f4efe6'; c.font = "9px 'Press Start 2P',monospace";
+  c.fillText(b, 180, 260);
+}
+
+/* ---------- Flappy ---------- */
+const F = {
+  tip: 'Tap, click or press Space to flap.',
+  init() { this.y = 240; this.v = 0; this.p = []; this.s = 0; this.dead = false; this.t = 0; this.go = false; },
+  act() { if (this.dead) { this.init(); return; } this.go = true; this.v = -6.2; },
+  step() {
+    if (!this.go || this.dead) return;
+    this.v += .38; this.y += this.v; this.t++;
+    if (this.t % 90 === 1) this.p.push({ x: 360, g: 100 + Math.random() * 280 });
+    this.p.forEach(o => o.x -= 2.5);
+    if (this.p.length && this.p[0].x < -50) this.p.shift();
+    this.p.forEach(o => {
+      if (!o.d && o.x + 46 < 80) { o.d = 1; this.s++; }
+      if (92 > o.x && 68 < o.x + 46 && (this.y - 12 < o.g - 60 || this.y + 12 > o.g + 60)) this.dead = true;
+    });
+    if (this.y > 468 || this.y < 12) this.dead = true;
+    if (this.dead) save('flappy', this.s);
+  },
+  draw() {
+    c.fillStyle = '#0f0e1a'; c.fillRect(0, 0, 360, 480);
+    c.fillStyle = '#5eead4';
+    this.p.forEach(o => { c.fillRect(o.x, 0, 46, o.g - 60); c.fillRect(o.x, o.g + 60, 46, 480 - o.g - 60); });
+    c.fillStyle = '#ffc857'; c.beginPath(); c.arc(80, this.y, 12, 0, 7); c.fill();
+    c.fillStyle = '#1d1b2f'; c.fillRect(85, this.y - 5, 4, 4);
+    info('Score ' + this.s + '   Best ' + (best.flappy || 0));
+    if (!this.go) banner('FLAPPY', 'Tap to start');
+    else if (this.dead) banner('GAME OVER', 'Tap to retry');
+  }
+};
+
+/* ---------- Snake ---------- */
+const S = {
+  tip: 'Arrow keys or WASD. On a phone, swipe on the board.',
+  init() {
+    this.b = [{ x: 9, y: 12 }, { x: 8, y: 12 }, { x: 7, y: 12 }];
+    this.d = { x: 1, y: 0 }; this.n = this.d; this.s = 0; this.dead = false; this.t = 0; this.go = false;
+    this.f = this.food();
+  },
+  food() {
+    let f;
+    do f = { x: Math.random() * 18 | 0, y: Math.random() * 24 | 0 };
+    while (this.b.some(q => q.x === f.x && q.y === f.y));
+    return f;
+  },
+  dir(x, y) { this.go = true; if (x !== -this.d.x || y !== -this.d.y) this.n = { x, y }; },
+  act() { if (this.dead) this.init(); else this.go = true; },
+  step() {
+    if (!this.go || this.dead) return;
+    if (++this.t < Math.max(4, 8 - (this.s >> 2))) return;
+    this.t = 0; this.d = this.n;
+    const h = { x: this.b[0].x + this.d.x, y: this.b[0].y + this.d.y };
+    if (h.x < 0 || h.y < 0 || h.x >= 18 || h.y >= 24 || this.b.some(q => q.x === h.x && q.y === h.y)) {
+      this.dead = true; save('snake', this.s); return;
+    }
+    this.b.unshift(h);
+    if (h.x === this.f.x && h.y === this.f.y) { this.s++; this.f = this.food(); } else this.b.pop();
+  },
+  draw() {
+    c.fillStyle = '#0f0e1a'; c.fillRect(0, 0, 360, 480);
+    c.fillStyle = '#ff5d73'; c.fillRect(this.f.x * 20 + 2, this.f.y * 20 + 2, 16, 16);
+    this.b.forEach((q, i) => { c.fillStyle = i ? '#5eead4' : '#ffc857'; c.fillRect(q.x * 20 + 1, q.y * 20 + 1, 18, 18); });
+    info('Score ' + this.s + '   Best ' + (best.snake || 0));
+    if (!this.go) banner('SNAKE', 'Press a key or swipe');
+    else if (this.dead) banner('GAME OVER', 'Tap to retry');
+  }
+};
+
+/* ---------- Tic-Tac-Toe (you = X, bot = O) ---------- */
+const L = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+let T = { b: [], over: false };
+const winner = b => { for (const [x, y, z] of L) if (b[x] && b[x] === b[y] && b[x] === b[z]) return b[x]; return b.every(Boolean) ? 'draw' : null; };
+function botMove() {
+  const b = T.b, empty = b.map((v, i) => v ? -1 : i).filter(i => i >= 0);
+  for (const who of ['O', 'X'])
+    for (const i of empty) { b[i] = who; const w = winner(b) === who; b[i] = ''; if (w) return i; }
+  if (!b[4]) return 4;
+  return empty[Math.random() * empty.length | 0];
+}
+function tttRender() {
+  const w = winner(T.b);
+  $('#ttt').innerHTML = T.b.map((v, i) => `<button data-i="${i}" ${v || w ? 'disabled' : ''}>${v}</button>`).join('');
+  info(w === 'X' ? 'You win!' : w === 'O' ? 'Bot wins' : w === 'draw' ? 'Draw' : 'Your turn (X)');
+  $('#again').hidden = !w;
+}
+$('#ttt').onclick = e => {
+  const i = e.target.dataset.i;
+  if (i === undefined || T.b[i] || winner(T.b)) return;
+  T.b[i] = 'X';
+  if (!winner(T.b)) T.b[botMove()] = 'O';
+  tttRender();
+};
+function tttInit() { T.b = Array(9).fill(''); tttRender(); }
+
+/* ---------- Memory match ---------- */
+let M = {};
+function memInit() {
+  const e = ['🍕','🚀','🐙','🎸','🌵','🍩','👾','🦊'];
+  M = { cards: [...e, ...e].sort(() => Math.random() - .5), open: [], done: 0, moves: 0, lock: false };
+  $('#mem').innerHTML = M.cards.map((_, i) => `<button data-i="${i}">?</button>`).join('');
+  $('#again').hidden = true;
+  info('Moves 0   Best ' + (best.mem || '-'));
+}
+$('#mem').onclick = e => {
+  const i = e.target.dataset.i, b = e.target;
+  if (i === undefined || M.lock || b.classList.contains('up') || b.classList.contains('done')) return;
+  b.textContent = M.cards[i]; b.classList.add('up'); M.open.push(b);
+  if (M.open.length < 2) return;
+  M.moves++;
+  const [x, y] = M.open;
+  if (M.cards[x.dataset.i] === M.cards[y.dataset.i]) {
+    x.className = y.className = 'done'; M.open = []; M.done++;
+    if (M.done === 8) { save('mem', M.moves, true); $('#again').hidden = false; info('Cleared in ' + M.moves + ' moves!'); return; }
+  } else {
+    M.lock = true;
+    setTimeout(() => { M.open.forEach(z => { z.className = ''; z.textContent = '?'; }); M.open = []; M.lock = false; }, 700);
+  }
+  info('Moves ' + M.moves + '   Best ' + (best.mem || '-'));
+};
+
+/* ---------- Shell ---------- */
+const canvasGames = { flappy: F, snake: S };
+function show(g) {
+  cur = g;
+  document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.g === g));
+  cv.hidden = !canvasGames[g]; $('#ttt').hidden = g !== 'ttt'; $('#mem').hidden = g !== 'mem';
+  $('#again').hidden = true;
+  $('#tip').textContent = g === 'ttt' ? 'You are X. Try to beat the bot.' : g === 'mem' ? 'Flip two cards. Match all 8 pairs in the fewest moves.' : canvasGames[g].tip;
+  if (canvasGames[g]) canvasGames[g].init(); else if (g === 'ttt') tttInit(); else memInit();
+}
+$('#nav').onclick = e => { if (e.target.dataset.g) show(e.target.dataset.g); };
+$('#again').onclick = () => show(cur);
+
+document.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (cur === 'flappy' && (k === ' ' || k === 'arrowup')) { e.preventDefault(); F.act(); }
+  if (cur === 'snake') {
+    const m = { arrowup: [0,-1], w: [0,-1], arrowdown: [0,1], s: [0,1], arrowleft: [-1,0], a: [-1,0], arrowright: [1,0], d: [1,0] }[k];
+    if (m) { e.preventDefault(); S.dir(...m); }
+    else if (k === ' ') { e.preventDefault(); S.act(); }
+  }
+});
+let sx, sy;
+cv.addEventListener('pointerdown', e => { sx = e.clientX; sy = e.clientY; if (cur === 'flappy') F.act(); });
+cv.addEventListener('pointerup', e => {
+  if (cur !== 'snake') return;
+  const dx = e.clientX - sx, dy = e.clientY - sy;
+  if (Math.abs(dx) < 20 && Math.abs(dy) < 20) S.act();
+  else if (Math.abs(dx) > Math.abs(dy)) S.dir(dx > 0 ? 1 : -1, 0);
+  else S.dir(0, dy > 0 ? 1 : -1);
+});
+
+(function tick() {
+  const g = canvasGames[cur];
+  if (g) { g.step(); g.draw(); }
+  requestAnimationFrame(tick);
+})();
+show('flappy');
+</script>
+</body>
+</html>
